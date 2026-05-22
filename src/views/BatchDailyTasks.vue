@@ -762,6 +762,10 @@
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentSettings.payRecruit" />
             </div>
+            <div class="switch-row">
+              <span class="switch-label">免费扭蛋</span
+              ><n-switch v-model:value="currentSettings.freeGachaEnable" />
+            </div>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -847,6 +851,10 @@
             <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentTemplate.payRecruit" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">免费扭蛋</span
+              ><n-switch v-model:value="currentTemplate.freeGachaEnable" />
             </div>
           </div>
         </div>
@@ -2760,6 +2768,7 @@ const currentSettings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  freeGachaEnable: true,
 });
 
 // Task Template State
@@ -4442,6 +4451,7 @@ const openTaskTemplateModal = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    freeGachaEnable: true,
   });
   currentTemplateName.value = "";
   showTaskTemplateModal.value = true;

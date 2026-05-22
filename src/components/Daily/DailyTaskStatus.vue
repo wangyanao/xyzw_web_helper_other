@@ -185,6 +185,11 @@
               <span class="switch-label">付费招募</span>
               <n-switch v-model:value="settings.payRecruit" />
             </div>
+
+            <div class="switch-row">
+              <span class="switch-label">免费扭蛋</span>
+              <n-switch v-model:value="settings.freeGachaEnable" />
+            </div>
           </div>
         </div>
       </div>
@@ -318,6 +323,7 @@ const settings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  freeGachaEnable: true,
   commandDelay: 500,
   taskDelay: 500,
 });

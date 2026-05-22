@@ -163,6 +163,7 @@ export class DailyTaskRunner {
         claimHangUp: true,
         claimEmail: true,
         blackMarketPurchase: true,
+        freeGachaEnable: true,
       };
       return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
     } catch (error) {
@@ -541,6 +542,23 @@ export class DailyTaskRunner {
           "领取珍宝阁免费礼包",
         ),
     });
+
+    // 免费扭蛋
+    if (
+      settings.freeGachaEnable !== false
+      && isTodayAvailable(statisticsTime["gacha:free"])
+    ) {
+      taskList.push({
+        name: "免费扭蛋",
+        execute: () =>
+          this.executeGameCommand(
+            tokenId,
+            "gacha_drawreward",
+            { num: 1, isGroup: false },
+            "免费扭蛋",
+          ),
+      });
+    }
 
     // 5. 免费活动
     if (isTodayAvailable(statistics["artifact:normal:lottery:time"])) {

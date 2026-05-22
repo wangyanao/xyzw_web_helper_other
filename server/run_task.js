@@ -475,6 +475,13 @@ async function runDailyBasic(client, tokenName, delay = 500, batchSettings = {})
     }
   }
 
+  // ── 免费扭蛋 ──
+  const freeGachaEnable = batchSettings.freeGachaEnable ?? true;
+  if (freeGachaEnable && isTodayAvail(statisticsTime['gacha:free'])) {
+    await execCmd(client, tokenName, 'gacha_drawreward', { num: 1, isGroup: false }, '免费扭蛋');
+    await sleep(delay);
+  }
+
   // ── 6. 免费活动（钓鱼/灯神）──
   if (isTodayAvail(statistics['artifact:normal:lottery:time'])) {
     for (let i = 0; i < 3; i++) {
@@ -2255,6 +2262,7 @@ async function main() {
     if (perTokenSettings.openBox != null) mergedSettings.openBox = perTokenSettings.openBox;
     if (perTokenSettings.claimEmail != null) mergedSettings.claimEmail = perTokenSettings.claimEmail;
     if (perTokenSettings.blackMarketPurchase != null) mergedSettings.blackMarketPurchase = perTokenSettings.blackMarketPurchase;
+    if (perTokenSettings.freeGachaEnable != null) mergedSettings.freeGachaEnable = perTokenSettings.freeGachaEnable;
 
     const client = new GameClient({
       log: (msg, level) => log(tokenName, msg, level),
