@@ -429,6 +429,17 @@ export class GameClient {
     });
   }
 
+  /**
+   * 发送命令（不等待响应，fire-and-forget）
+   */
+  send(cmd, params = {}) {
+    if (!this._connected || !this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+    const seq = this._seq++;
+    const body = bon.encode(params);
+    const outer = { cmd, ack: this._ack, seq, time: Date.now(), body };
+    this._ws.send(Buffer.from(encryptX(bon.encode(outer))), () => {});
+  }
+
   _startHeartbeat() {
     this._heartbeatTimer = setInterval(() => {
       if (!this._connected || !this._ws || this._ws.readyState !== WebSocket.OPEN) return;

@@ -95,7 +95,7 @@
             >
               任务模板
             </n-button>
-            <n-button @click="openBatchSettings" type="default" size="medium">
+            <n-button v-if="userStore.isAdmin" @click="openBatchSettings" type="default" size="medium">
               <template #icon>
                 <n-icon>
                   <Settings />
@@ -275,6 +275,7 @@
                       </div>
                     </n-checkbox>
                     <n-button
+                      v-if="userStore.isAdmin"
                       size="tiny"
                       circle
                       @click.stop="openSettings(token)"
@@ -769,7 +770,7 @@
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
-          <n-button type="primary" @click="saveSettings">保存设置</n-button>
+          <n-button v-if="userStore.isAdmin" type="primary" @click="saveSettings">保存设置</n-button>
         </div>
       </div>
     </n-modal>
@@ -2008,7 +2009,7 @@
             style="margin-right: 12px"
             >取消</n-button
           >
-          <n-button type="primary" @click="saveBatchSettings"
+          <n-button v-if="userStore.isAdmin" type="primary" @click="saveBatchSettings"
             >保存设置</n-button
           >
         </div>
@@ -2334,6 +2335,7 @@ import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
 import { Settings } from "@vicons/ionicons5";
+import { useUserStore } from "@/stores/userStore";
 
 // Import batch task modules
 import {
@@ -2393,6 +2395,7 @@ import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
+const userStore = useUserStore();
 const { visibleTokens } = useVisibleTokens();
 const message = useMessage();
 

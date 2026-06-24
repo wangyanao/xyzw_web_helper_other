@@ -820,9 +820,96 @@ async function runGenieSweep(client, tokenName, delay = 500) {
   }
 }
 
-/** 答题（study_startgame，仅发起，无法等待完成） */
+/**
+ * 从 answer.json 查找答案
+ */
+let _answerData = null;
+function loadAnswerData() {
+  if (_answerData) return _answerData;
+  try {
+    const filePath = join(__dirname, '..', 'public', 'answer.json');
+    const raw = readFileSync(filePath, 'utf-8');
+    _answerData = JSON.parse(raw);
+    log('答题加载', `已加载 ${_answerData.length} 条答案数据`, 'info');
+  } catch (e) {
+    log('答题加载', `加载答案数据失败: ${e.message}`, 'warning');
+    _answerData = [];
+  }
+  return _answerData;
+}
+function findAnswer(questionText) {
+  const questions = loadAnswerData();
+  if (!questions || questions.length === 0) return null;
+  const cleanActual = (questionText || '').replace(/\s+/g, '').toLowerCase();
+  for (const item of questions) {
+    if (!item.name) continue;
+    const cleanDB = item.name.replace(/\s+/g, '').toLowerCase();
+    if (cleanActual.includes(cleanDB) || cleanDB.includes(cleanActual)) {
+      return item.value;
+    }
+  }
+  return null;
+}
+
+/** 一键答题（完整流程：发起 → 自动回答 → 领取奖励） */
 async function runBatchStudy(client, tokenName) {
-  await execCmd(client, tokenName, 'study_startgame', {}, '开始答题', 8000);
+  try {
+    // 1. 发起答题
+    log(tokenName, '开始答题', 'info');
+    const resp = await client.sendWithPromise('study_startgame', {}, 10000);
+
+    const questionList = resp?.questionList;
+    const studyId = resp?.role?.study?.id;
+
+    if (!questionList || !Array.isArray(questionList) || questionList.length === 0) {
+      log(tokenName, '未获取到答题题目，可能已经完成或还在准备中', 'warning');
+      return;
+    }
+    if (!studyId) {
+      log(tokenName, '未获取到学习ID', 'error');
+      return;
+    }
+
+    log(tokenName, `获取到 ${questionList.length} 道题目, studyId=${studyId}`, 'info');
+
+    // 2. 逐题回答
+    for (let i = 0; i < questionList.length; i++) {
+      const q = questionList[i];
+      const questionText = q.question || '';
+      const questionId = q.id;
+
+      let answer = 1;
+      try {
+        const found = findAnswer(questionText);
+        if (found !== null) answer = found;
+      } catch {}
+
+      try {
+        await client.sendWithPromise('study_answer', {
+          id: studyId,
+          option: [answer],
+          questionId: [questionId],
+        }, 5000);
+        log(tokenName, `已回答 ${i + 1}/${questionList.length}`, 'success');
+      } catch (e) {
+        log(tokenName, `提交第 ${i + 1} 题答案失败: ${e.message}`, 'warning');
+      }
+
+      await sleep(300);
+    }
+
+    // 3. 等待后领取奖励
+    await sleep(1500);
+    log(tokenName, '领取答题奖励', 'info');
+    for (let rewardId = 1; rewardId <= 10; rewardId++) {
+      client.send('study_claimreward', { rewardId });
+      await sleep(200);
+    }
+
+    log(tokenName, '一键答题完成', 'success');
+  } catch (err) {
+    log(tokenName, `答题失败: ${err.message}`, 'error');
+  }
 }
 
 /** 宝库1-3层（bosstower_startboss x2 + bosstower_startbox x9）*/
