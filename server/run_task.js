@@ -822,19 +822,27 @@ async function runGenieSweep(client, tokenName, delay = 500) {
 
 /**
  * 从 answer.json 查找答案
+ * 依次尝试多个可能路径（开发环境 / Docker生产环境）
  */
 let _answerData = null;
 function loadAnswerData() {
   if (_answerData) return _answerData;
-  try {
-    const filePath = join(__dirname, '..', 'public', 'answer.json');
-    const raw = readFileSync(filePath, 'utf-8');
-    _answerData = JSON.parse(raw);
-    log('答题加载', `已加载 ${_answerData.length} 条答案数据`, 'info');
-  } catch (e) {
-    log('答题加载', `加载答案数据失败: ${e.message}`, 'warning');
-    _answerData = [];
+  const candidates = [
+    join(__dirname, '..', 'public', 'answer.json'),   // 开发环境
+    '/root/app/web/dist/answer.json',                  // 生产环境（前端 dist）
+    join(__dirname, 'data', 'answer.json'),             // 备用：server/data/
+    join(__dirname, 'answer.json'),                     // 备用：server/
+  ];
+  for (const filePath of candidates) {
+    try {
+      const raw = readFileSync(filePath, 'utf-8');
+      _answerData = JSON.parse(raw);
+      log('答题加载', `已加载 ${_answerData.length} 条答案数据 (${filePath})`, 'info');
+      return _answerData;
+    } catch { continue; }
   }
+  log('答题加载', '所有路径均未找到 answer.json', 'warning');
+  _answerData = [];
   return _answerData;
 }
 function findAnswer(questionText) {

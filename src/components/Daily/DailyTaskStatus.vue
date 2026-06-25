@@ -550,21 +550,55 @@ const getCurrentRole = () => {
     : null;
 };
 
-const loadSettings = (roleId) => {
+const _sessionHeader = () => {
+  const token = sessionStorage.getItem('xyzw_session_token') || '';
+  return token ? { 'X-Session-Token': token } : {};
+};
+
+const loadSettings = async (roleId) => {
   try {
     const raw = localStorage.getItem(`daily-settings:${roleId}`);
-    return raw ? JSON.parse(raw) : null;
+    if (raw) return JSON.parse(raw);
+
+    // localStorage 无数据，尝试从服务端加载（跨浏览器持久化）
+    const tokenId = tokenStore.selectedToken?.id;
+    if (tokenId) {
+      try {
+        const res = await fetch(`/api/token-settings/${tokenId}`, {
+          headers: { ..._sessionHeader() },
+        });
+        if (res.ok) {
+          const serverSettings = await res.json();
+          if (serverSettings && Object.keys(serverSettings).length > 0) {
+            localStorage.setItem(`daily-settings:${roleId}`, JSON.stringify(serverSettings));
+            return serverSettings;
+          }
+        }
+      } catch (_) {}
+    }
+
+    return null;
   } catch (error) {
-    console.error("Failed to load settings:", error);
+    console.error('Failed to load settings:', error);
     return null;
   }
 };
 
-const saveSettings = (roleId, s) => {
+const saveSettings = (tokenId, s) => {
   try {
-    localStorage.setItem(`daily-settings:${roleId}`, JSON.stringify(s));
+    // 写到 localStorage
+    localStorage.setItem(`daily-settings:${tokenId}`, JSON.stringify(s));
+    // 同步到服务端（异步，静默失败）
+    fetch(`/api/token-settings/${tokenId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ..._sessionHeader(),
+      },
+      body: JSON.stringify({ settings: s }),
+    }).catch(() => {});
   } catch (error) {
-    console.error("Failed to save settings:", error);
+    console.error('Failed to save settings:', error);
   }
 };
 
@@ -572,8 +606,8 @@ const saveSettings = (roleId, s) => {
 watch(
   settings,
   (cur) => {
-    const role = getCurrentRole();
-    if (role) saveSettings(role.roleId, cur);
+    const token = tokenStore.selectedToken;
+    if (token) saveSettings(token.id, cur);
   },
   { deep: true },
 );
@@ -586,7 +620,7 @@ watch(
       log(`切换到Token: ${newToken.name}`);
 
       // 加载新token的设置
-      const saved = loadSettings(newToken.id);
+      const saved = await loadSettings(newToken.id);
       if (saved) Object.assign(settings, saved);
 
       // 如果WebSocket已连接，尝试获取最新角色信息
@@ -629,7 +663,7 @@ onMounted(async () => {
 
   const role = getCurrentRole();
   if (role) {
-    const saved = loadSettings(role.roleId);
+    const saved = await loadSettings(role.roleId);
     if (saved) Object.assign(settings, saved);
   }
 

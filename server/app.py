@@ -82,6 +82,7 @@ _sessions: dict = {}
 # ===== 文件操作锁（防止并发读写导致 JSON 损坏）=====
 _users_lock = threading.Lock()
 _tokens_lock = threading.Lock()
+_tasks_lock = threading.Lock()
 _bin_map_lock = threading.Lock()
 _lineups_lock = threading.Lock()
 
@@ -547,9 +548,12 @@ def load_tasks():
 
 
 def save_tasks(tasks):
-    """保存任务列表到 tasks.json"""
-    with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=2)
+    """保存任务列表到 tasks.json（原子写入，带锁防并发覆盖）"""
+    with _tasks_lock:
+        tmp = TASKS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(tasks, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, TASKS_FILE)
 
 
 def load_tokens():
@@ -766,6 +770,40 @@ def trigger_task(task_id):
     import threading
     threading.Thread(target=_fire_task, args=(task_id,), daemon=True).start()
     return jsonify({'success': True, 'message': f'任务 {task["name"]} 已触发（后台执行）'})
+
+
+@app.route('/api/token-settings/<token_id>', methods=['GET', 'PUT'])
+@require_auth
+def handle_token_settings(token_id):
+    """获取/保存单个 Token 的 per-token 设置（跨浏览器持久化）"""
+    if request.method == 'GET':
+        tasks = load_tasks()
+        for task in tasks:
+            ts = task.get('tokenSettings', {}).get(token_id)
+            if ts:
+                return jsonify(ts)
+        return jsonify({})
+
+    # PUT: 保存设置到所有包含此 token 的任务
+    data = request.get_json(silent=True)
+    if not data or 'settings' not in data:
+        return jsonify({'error': '缺少 settings 字段'}), 400
+
+    settings = data['settings']
+    tasks = load_tasks()
+    updated = False
+    for task in tasks:
+        if token_id in task.get('selectedTokens', []):
+            if 'tokenSettings' not in task:
+                task['tokenSettings'] = {}
+            task['tokenSettings'][token_id] = settings
+            updated = True
+
+    if not updated:
+        return jsonify({'error': '未找到包含该 token 的定时任务'}), 404
+
+    save_tasks(tasks)
+    return jsonify({'success': True})
 
 
 # ===== Token 同步 API =====

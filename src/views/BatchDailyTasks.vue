@@ -2884,33 +2884,49 @@ const batchSettings = reactive({
 });
 
 // Load batch settings from localStorage
-const loadBatchSettings = () => {
+const loadBatchSettings = async () => {
   try {
-    const saved = localStorage.getItem("batchSettings");
+    const saved = localStorage.getItem('batchSettings');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      Object.assign(batchSettings, parsed);
+      Object.assign(batchSettings, JSON.parse(saved));
+      return;
     }
+
+    // localStorage 无数据，尝试从服务端加载（跨浏览器持久化）
+    try {
+      const res = await fetch('/api/tasks', {
+        headers: { ...schedulerSessionHeaders() },
+      });
+      if (res.ok) {
+        const tasks = await res.json();
+        if (tasks.length > 0 && tasks[0].batchSettings) {
+          Object.assign(batchSettings, tasks[0].batchSettings);
+          localStorage.setItem('batchSettings', JSON.stringify(tasks[0].batchSettings));
+        }
+      }
+    } catch (_) {}
   } catch (error) {
-    console.error("Failed to load batch settings:", error);
+    console.error('Failed to load batch settings:', error);
   }
 };
 
-// Save batch settings to localStorage
+// Save batch settings to localStorage and sync to server
 const saveBatchSettings = () => {
   try {
-    localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
-    message.success("定时批量任务设置已保存");
+    localStorage.setItem('batchSettings', JSON.stringify(batchSettings));
+    // 同步到服务端，确保跨浏览器持久化
+    syncTasksToServer(scheduledTasks.value).catch(() => {});
+    message.success('定时批量任务设置已保存');
     showBatchSettingsModal.value = false;
   } catch (error) {
-    console.error("Failed to save batch settings:", error);
-    message.error("保存设置失败");
+    console.error('Failed to save batch settings:', error);
+    message.error('保存设置失败');
   }
 };
 
 // Open batch settings modal
-const openBatchSettings = () => {
-  loadBatchSettings();
+const openBatchSettings = async () => {
+  await loadBatchSettings();
   showBatchSettingsModal.value = true;
 };
 
@@ -4395,7 +4411,7 @@ const clearAllItems = () => {
 
 // 注: formationOptions, bossTimesOptions 已从 @/utils/batch 导入
 
-const loadSettings = (tokenId) => {
+const loadSettings = async (tokenId) => {
   try {
     const raw = localStorage.getItem(`daily-settings:${tokenId}`);
     const defaultSettings = {
@@ -4411,17 +4427,37 @@ const loadSettings = (tokenId) => {
       claimEmail: true,
       blackMarketPurchase: true,
     };
-    return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
+    if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
+
+    // localStorage 无数据，尝试从服务端 tasks.json 加载（跨浏览器持久化）
+    try {
+      const res = await fetch('/api/tasks', {
+        headers: { ...schedulerSessionHeaders() },
+      });
+      if (res.ok) {
+        const tasks = await res.json();
+        for (const task of tasks) {
+          const ts = task.tokenSettings?.[tokenId];
+          if (ts) {
+            // 缓存到 localStorage 供下次快速加载
+            localStorage.setItem(`daily-settings:${tokenId}`, JSON.stringify(ts));
+            return { ...defaultSettings, ...ts };
+          }
+        }
+      }
+    } catch (_) {}
+
+    return defaultSettings;
   } catch (error) {
-    console.error("Failed to load settings:", error);
+    console.error('Failed to load settings:', error);
     return null;
   }
 };
 
-const openSettings = (token) => {
+const openSettings = async (token) => {
   currentSettingsTokenId.value = token.id;
   currentSettingsTokenName.value = token.name;
-  const saved = loadSettings(token.id);
+  const saved = await loadSettings(token.id);
   Object.assign(currentSettings, saved);
   showSettingsModal.value = true;
 };
@@ -4432,6 +4468,8 @@ const saveSettings = () => {
       `daily-settings:${currentSettingsTokenId.value}`,
       JSON.stringify(currentSettings),
     );
+    // 同步到服务端，确保跨浏览器持久化
+    syncTasksToServer(scheduledTasks.value).catch(() => {});
     message.success(`已保存 ${currentSettingsTokenName.value} 的设置`);
     showSettingsModal.value = false;
   }
