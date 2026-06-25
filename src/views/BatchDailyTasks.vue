@@ -2892,16 +2892,16 @@ const loadBatchSettings = async () => {
       return;
     }
 
-    // localStorage 无数据，尝试从服务端加载（跨浏览器持久化）
+    // localStorage 无数据，尝试从服务端 batch_settings.json 加载（跨浏览器持久化）
     try {
-      const res = await fetch('/api/tasks', {
+      const res = await fetch('/api/batch-settings', {
         headers: { ...schedulerSessionHeaders() },
       });
       if (res.ok) {
-        const tasks = await res.json();
-        if (tasks.length > 0 && tasks[0].batchSettings) {
-          Object.assign(batchSettings, tasks[0].batchSettings);
-          localStorage.setItem('batchSettings', JSON.stringify(tasks[0].batchSettings));
+        const serverSettings = await res.json();
+        if (serverSettings && Object.keys(serverSettings).length > 0) {
+          Object.assign(batchSettings, serverSettings);
+          localStorage.setItem('batchSettings', JSON.stringify(serverSettings));
         }
       }
     } catch (_) {}
@@ -2910,12 +2910,19 @@ const loadBatchSettings = async () => {
   }
 };
 
-// Save batch settings to localStorage and sync to server
+// Save batch settings to localStorage and server
 const saveBatchSettings = () => {
   try {
     localStorage.setItem('batchSettings', JSON.stringify(batchSettings));
-    // 同步到服务端，确保跨浏览器持久化
-    syncTasksToServer(scheduledTasks.value).catch(() => {});
+    // 同步到服务端 batch_settings.json
+    fetch('/api/batch-settings', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...schedulerSessionHeaders(),
+      },
+      body: JSON.stringify({ settings: { ...batchSettings } }),
+    }).catch(() => {});
     message.success('定时批量任务设置已保存');
     showBatchSettingsModal.value = false;
   } catch (error) {
@@ -3101,30 +3108,16 @@ const saveScheduledTasksLocal = () => {
   }
 };
 
-// 将定时任务同步到服务端 APScheduler
+// 将定时任务同步到服务端 APScheduler（仅同步任务定义，配置已独立存储）
 const syncTasksToServer = async (tasks) => {
   try {
-    // 收集每个 token 的 per-token 设置（如 arenaFormation 等），供服务端使用
-    const tokenSettingsMap = {};
-    tokens.value.forEach((token) => {
-      const raw = localStorage.getItem(`daily-settings:${token.id}`);
-      if (raw) {
-        try { tokenSettingsMap[token.id] = JSON.parse(raw); } catch (_) {}
-      }
-    });
-    // 每个任务附带当前 batchSettings 和 tokenSettings
-    const tasksWithSettings = tasks.map(t => ({
-      ...t,
-      batchSettings: { ...batchSettings },
-      tokenSettings: tokenSettingsMap,
-    }));
-    const res = await fetch("/api/tasks/sync", {
-      method: "POST",
+    const res = await fetch('/api/tasks/sync', {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...schedulerSessionHeaders(),
       },
-      body: JSON.stringify(tasksWithSettings),
+      body: JSON.stringify(tasks),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     console.debug("[scheduler] 服务端任务同步成功，共", tasks.length, "条");
@@ -4429,20 +4422,16 @@ const loadSettings = async (tokenId) => {
     };
     if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
 
-    // localStorage 无数据，尝试从服务端 tasks.json 加载（跨浏览器持久化）
+    // localStorage 无数据，尝试从服务端 user_daily_config.json 加载（跨浏览器持久化）
     try {
-      const res = await fetch('/api/tasks', {
+      const res = await fetch(`/api/user-daily-config/${tokenId}`, {
         headers: { ...schedulerSessionHeaders() },
       });
       if (res.ok) {
-        const tasks = await res.json();
-        for (const task of tasks) {
-          const ts = task.tokenSettings?.[tokenId];
-          if (ts) {
-            // 缓存到 localStorage 供下次快速加载
-            localStorage.setItem(`daily-settings:${tokenId}`, JSON.stringify(ts));
-            return { ...defaultSettings, ...ts };
-          }
+        const serverSettings = await res.json();
+        if (serverSettings && Object.keys(serverSettings).length > 0) {
+          localStorage.setItem(`daily-settings:${tokenId}`, JSON.stringify(serverSettings));
+          return { ...defaultSettings, ...serverSettings };
         }
       }
     } catch (_) {}
@@ -4468,8 +4457,15 @@ const saveSettings = () => {
       `daily-settings:${currentSettingsTokenId.value}`,
       JSON.stringify(currentSettings),
     );
-    // 同步到服务端，确保跨浏览器持久化
-    syncTasksToServer(scheduledTasks.value).catch(() => {});
+    // 同步到服务端 user_daily_config.json
+    fetch(`/api/user-daily-config/${currentSettingsTokenId.value}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...schedulerSessionHeaders(),
+      },
+      body: JSON.stringify({ settings: { ...currentSettings } }),
+    }).catch(() => {});
     message.success(`已保存 ${currentSettingsTokenName.value} 的设置`);
     showSettingsModal.value = false;
   }

@@ -62,6 +62,8 @@ BIN_DIR = os.path.join(BASE_DIR, 'bin')
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 TASKS_FILE = os.path.join(DATA_DIR, 'tasks.json')
 TOKENS_FILE = os.path.join(DATA_DIR, 'tokens.json')
+USER_DAILY_CONFIG_FILE = os.path.join(DATA_DIR, 'user_daily_config.json')
+BATCH_SETTINGS_FILE = os.path.join(DATA_DIR, 'batch_settings.json')
 LINEUPS_FILE = os.path.join(DATA_DIR, 'lineups.json')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 BIN_MAP_FILE = os.path.join(DATA_DIR, 'bin_map.json')  # filename → tokenId (MD5)
@@ -556,6 +558,48 @@ def save_tasks(tasks):
         os.replace(tmp, TASKS_FILE)
 
 
+def load_user_daily_config() -> dict:
+    """从 user_daily_config.json 读取个人日常配置（tokenId → 设置字典）"""
+    with _tasks_lock:
+        try:
+            if os.path.isfile(USER_DAILY_CONFIG_FILE):
+                with open(USER_DAILY_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+
+def save_user_daily_config(config: dict):
+    """保存个人日常配置到 user_daily_config.json（原子写入）"""
+    with _tasks_lock:
+        tmp = USER_DAILY_CONFIG_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, USER_DAILY_CONFIG_FILE)
+
+
+def load_batch_settings() -> dict:
+    """从 batch_settings.json 读取批量任务全局配置"""
+    with _tasks_lock:
+        try:
+            if os.path.isfile(BATCH_SETTINGS_FILE):
+                with open(BATCH_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+
+def save_batch_settings(settings: dict):
+    """保存批量任务全局配置到 batch_settings.json（原子写入）"""
+    with _tasks_lock:
+        tmp = BATCH_SETTINGS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, BATCH_SETTINGS_FILE)
+
+
 def load_tokens():
     """从 tokens.json 读取 token 映射"""
     with _tokens_lock:
@@ -772,37 +816,42 @@ def trigger_task(task_id):
     return jsonify({'success': True, 'message': f'任务 {task["name"]} 已触发（后台执行）'})
 
 
-@app.route('/api/token-settings/<token_id>', methods=['GET', 'PUT'])
+@app.route('/api/user-daily-config/<token_id>', methods=['GET', 'PUT'])
 @require_auth
-def handle_token_settings(token_id):
-    """获取/保存单个 Token 的 per-token 设置（跨浏览器持久化）"""
+def handle_user_daily_config(token_id):
+    """获取/保存单个用户的日常任务配置（持久化到 user_daily_config.json）"""
     if request.method == 'GET':
-        tasks = load_tasks()
-        for task in tasks:
-            ts = task.get('tokenSettings', {}).get(token_id)
-            if ts:
-                return jsonify(ts)
-        return jsonify({})
+        config = load_user_daily_config()
+        return jsonify(config.get(token_id, {}))
 
-    # PUT: 保存设置到所有包含此 token 的任务
+    # PUT: 保存配置
     data = request.get_json(silent=True)
-    if not data or 'settings' not in data:
-        return jsonify({'error': '缺少 settings 字段'}), 400
+    if not data:
+        return jsonify({'error': '请求体为空'}), 400
 
-    settings = data['settings']
-    tasks = load_tasks()
-    updated = False
-    for task in tasks:
-        if token_id in task.get('selectedTokens', []):
-            if 'tokenSettings' not in task:
-                task['tokenSettings'] = {}
-            task['tokenSettings'][token_id] = settings
-            updated = True
+    settings = data.get('settings') if 'settings' in data else data
 
-    if not updated:
-        return jsonify({'error': '未找到包含该 token 的定时任务'}), 404
+    config = load_user_daily_config()
+    config[token_id] = settings
+    save_user_daily_config(config)
 
-    save_tasks(tasks)
+    return jsonify({'success': True})
+
+
+@app.route('/api/batch-settings', methods=['GET', 'PUT'])
+@require_auth
+def handle_batch_settings():
+    """获取/保存批量任务全局配置（持久化到 batch_settings.json）"""
+    if request.method == 'GET':
+        return jsonify(load_batch_settings())
+
+    # PUT: 保存配置
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': '请求体为空'}), 400
+
+    settings = data.get('settings') if 'settings' in data else data
+    save_batch_settings(settings)
     return jsonify({'success': True})
 
 

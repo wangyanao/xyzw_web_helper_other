@@ -14,6 +14,8 @@ import GameClient, { transformTokenFromBin } from './gameClient.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOKENS_FILE = join(__dirname, 'data', 'tokens.json');
+const USER_DAILY_CONFIG_FILE = join(__dirname, 'data', 'user_daily_config.json');
+const BATCH_SETTINGS_FILE = join(__dirname, 'data', 'batch_settings.json');
 const BIN_DIR = join(__dirname, 'bin');
 
 /**
@@ -42,6 +44,22 @@ async function refreshTokenFromBin(tokenId, tokenName) {
 function loadTokens() {
   try {
     return JSON.parse(readFileSync(TOKENS_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function loadUserDailyConfig() {
+  try {
+    return JSON.parse(readFileSync(USER_DAILY_CONFIG_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function loadBatchRunSettings() {
+  try {
+    return JSON.parse(readFileSync(BATCH_SETTINGS_FILE, 'utf-8'));
   } catch {
     return {};
   }
@@ -828,21 +846,25 @@ let _answerData = null;
 function loadAnswerData() {
   if (_answerData) return _answerData;
   const candidates = [
-    join(__dirname, '..', 'public', 'answer.json'),   // 开发环境
-    '/root/app/web/dist/answer.json',                  // 生产环境（前端 dist）
-    join(__dirname, 'data', 'answer.json'),             // 备用：server/data/
-    join(__dirname, 'answer.json'),                     // 备用：server/
+    join(__dirname, '..', 'public', 'answer.json'),
+    '/root/app/web/dist/answer.json',
+    join(__dirname, 'data', 'answer.json'),
+    join(__dirname, 'answer.json'),
   ];
   for (const filePath of candidates) {
     try {
       const raw = readFileSync(filePath, 'utf-8');
       _answerData = JSON.parse(raw);
-      log('答题加载', `已加载 ${_answerData.length} 条答案数据 (${filePath})`, 'info');
+      if (!Array.isArray(_answerData) || _answerData.length === 0) {
+        _answerData = null;
+        continue;
+      }
       return _answerData;
     } catch { continue; }
   }
-  log('答题加载', '所有路径均未找到 answer.json', 'warning');
   _answerData = [];
+  return _answerData;
+}
   return _answerData;
 }
 function findAnswer(questionText) {
@@ -2311,9 +2333,14 @@ async function main() {
     process.exit(1);
   }
 
-  const { name: taskName, selectedTokens = [], selectedTasks = [], batchSettings = {}, tokenSettings = {} } = task;
+  const { name: taskName, selectedTokens = [], selectedTasks = [] } = task;
+  // 从独立文件加载配置（而非从 tasks.json 内联）
+  const batchSettings = loadBatchRunSettings();
   const taskDelay = batchSettings.taskDelay ?? batchSettings.commandDelay ?? 500;
   const tokens = loadTokens();
+
+  // 从 user_daily_config.json 加载个人日常配置
+  const userDailyConfig = loadUserDailyConfig();
 
   if (Object.keys(tokens).length === 0) {
     log(taskName, `⚠️  tokens.json 为空或不存在 (路径: ${TOKENS_FILE})，请确认前端已同步 Token`, 'error');
@@ -2337,7 +2364,7 @@ async function main() {
     }
 
     // 合并 per-token 设置到 batchSettings（Token级别配置优先级高于全局配置）
-    const perTokenSettings = tokenSettings[tokenId] || {};
+    const perTokenSettings = userDailyConfig[tokenId] || {};
     const mergedSettings = { ...batchSettings };
     // per-token 设置覆盖全局设置
     // 1. 阵容配置

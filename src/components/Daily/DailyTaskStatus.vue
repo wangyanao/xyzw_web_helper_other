@@ -564,7 +564,7 @@ const loadSettings = async (roleId) => {
     const tokenId = tokenStore.selectedToken?.id;
     if (tokenId) {
       try {
-        const res = await fetch(`/api/token-settings/${tokenId}`, {
+        const res = await fetch(`/api/user-daily-config/${tokenId}`, {
           headers: { ..._sessionHeader() },
         });
         if (res.ok) {
@@ -589,7 +589,7 @@ const saveSettings = (tokenId, s) => {
     // 写到 localStorage
     localStorage.setItem(`daily-settings:${tokenId}`, JSON.stringify(s));
     // 同步到服务端（异步，静默失败）
-    fetch(`/api/token-settings/${tokenId}`, {
+    fetch(`/api/user-daily-config/${tokenId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
