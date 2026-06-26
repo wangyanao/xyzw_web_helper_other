@@ -865,8 +865,7 @@ function loadAnswerData() {
   _answerData = [];
   return _answerData;
 }
-  return _answerData;
-}
+
 function findAnswer(questionText) {
   const questions = loadAnswerData();
   if (!questions || questions.length === 0) return null;
