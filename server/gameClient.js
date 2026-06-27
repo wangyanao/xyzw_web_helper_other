@@ -247,6 +247,9 @@ const RESP_CMD_MAP = {
   discount_getdiscountinforesp: 'discount_getdiscountinfo',
   // 塔
   tower_claimrewardresp: 'tower_claimreward',
+  towers_getinforesp: 'towers_getinfo',
+  towers_startresp: 'towers_start',
+  towers_fightresp: 'towers_fight',
   evotowerinforesp: 'evotower_getinfo',
   evotower_fightresp: 'evotower_fight',
   // 任务

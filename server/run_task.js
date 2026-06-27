@@ -342,7 +342,7 @@ async function runDailyBasic(client, tokenName, delay = 500, batchSettings = {})
   let roleData = null;
   try {
     const res = await client.sendWithPromise('role_getroleinfo', {
-      clientVersion: '2.10.3-f10a39eaa0c409f4-wx',
+      clientVersion: '2.34.1',
       inviteUid: 0,
       platform: 'hortor',
       platformExt: 'mix',
@@ -707,42 +707,65 @@ async function runBatchMengjing(client, tokenName, delay = 500) {
 /** 换皮闯关 */
 async function runSkinChallenge(client, tokenName, delay = 500) {
   try {
-    let res = await client.sendWithPromise('towers_getinfo', {}, 5000);
+    // 根据当前日期计算 actId（周五轮换周期，与前端 towerActId.js 逻辑一致）
+    const calcTowerActId = (date = new Date()) => {
+      const day = date.getDay();
+      const diff = (day - 5 + 7) % 7; // 到周五的天数差
+      const friday = new Date(date);
+      friday.setHours(0, 0, 0, 0);
+      friday.setDate(friday.getDate() - diff);
+      const y = String(friday.getFullYear()).slice(-2);
+      const m = String(friday.getMonth() + 1).padStart(2, '0');
+      const d = String(friday.getDate()).padStart(2, '0');
+      return Number(`${y}${m}${d}1`);
+    };
+    const computedActId = calcTowerActId();
+
+    // 首次获取活动信息，带 actId 和 clientVersion
+    let res = await client.sendWithPromise('towers_getinfo', { actId: computedActId, clientVersion: '2.34.1' }, 5000);
     let towerData = res?.actId ? res : (res?.towerData?.actId ? res.towerData : res);
     if (!towerData?.actId) {
       log(tokenName, '换皮闯关：活动未开放', 'warning');
       return;
     }
-    // 检查活动时间
-    const actId = String(towerData.actId);
-    if (actId.length >= 6) {
-      const startDate = new Date(`20${actId.substring(0,2)}-${actId.substring(2,4)}-${actId.substring(4,6)}T00:00:00`);
+    // 使用服务端返回的实际 actId
+    const actId = towerData.actId;
+    if (String(actId).length >= 6) {
+      const actIdStr = String(actId);
+      const startDate = new Date(`20${actIdStr.substring(0,2)}-${actIdStr.substring(2,4)}-${actIdStr.substring(4,6)}T00:00:00`);
       const endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 7);
       if (Date.now() < startDate.getTime() || Date.now() >= endDate.getTime()) {
         log(tokenName, '换皮闯关：活动已结束', 'warning');
         return;
       }
     }
-    let levelRewardMap = towerData.levelRewardMap || {};
+
     const dayMap = { 5:[1], 6:[2], 0:[3], 1:[4], 2:[5], 3:[6], 4:[1,2,3,4,5,6] };
     const todayTypes = dayMap[new Date().getDay()] || [];
 
-    const isTowerCleared = (type, map) => {
-      const key = `${type}008`;
-      return !!(map[key] || map[Number(key)]);
+    // 用 towerData.towerData[type].pass 判断是否通关（替代已废弃的 levelRewardMap）
+    const isTowerCleared = (type) => {
+      const td = towerData?.towerData;
+      if (!td || !td[type]) return false;
+      const typeData = td[type];
+      // pass=1 表示已全部通关；actTowerLv 仅表示当前所在层，不能作为通关依据
+      return typeData.pass === 1 || typeData.pass === true;
     };
 
     for (const type of todayTypes) {
-      if (isTowerCleared(type, levelRewardMap)) continue;
+      if (isTowerCleared(type)) {
+        log(tokenName, `换皮闯关 BOSS${type}：已通关，跳过`, 'info');
+        continue;
+      }
       log(tokenName, `换皮闯关：开始挑战 BOSS${type}`, 'info');
 
       let needStart = true;
       let failCount = 0;
 
-      while (!isTowerCleared(type, levelRewardMap)) {
+      while (!isTowerCleared(type)) {
         if (needStart) {
           try {
-            await client.sendWithPromise('towers_start', { towerType: type }, 8000);
+            await client.sendWithPromise('towers_start', { towerType: type, actId, clientVersion: '2.34.1' }, 8000);
           } catch (e) {
             // 200330 = 存在未完成挑战，可直接 fight
             if (!e.message?.includes('200330')) {
@@ -754,7 +777,7 @@ async function runSkinChallenge(client, tokenName, delay = 500) {
         }
 
         try {
-          const fightRes = await client.sendWithPromise('towers_fight', { towerType: type }, 8000);
+          const fightRes = await client.sendWithPromise('towers_fight', { towerType: type, actId, clientVersion: '2.34.1' }, 8000);
           const curHP = fightRes?.battleData?.result?.accept?.ext?.curHP;
 
           if (curHP === 0) {
@@ -762,15 +785,14 @@ async function runSkinChallenge(client, tokenName, delay = 500) {
             needStart = false;
             failCount = 0;
             // 刷新进度
-            res = await client.sendWithPromise('towers_getinfo', {}, 5000);
+            res = await client.sendWithPromise('towers_getinfo', { actId, clientVersion: '2.34.1' }, 5000);
             towerData = res?.actId ? res : (res?.towerData?.actId ? res.towerData : res);
-            levelRewardMap = towerData?.levelRewardMap || {};
           } else {
             log(tokenName, `换皮闯关 BOSS${type} 当层失败`, 'warning');
             needStart = true;
             failCount++;
-            if (failCount >= 3) {
-              log(tokenName, `换皮闯关 BOSS${type} 连续失败3次，跳过`, 'warning');
+            if (failCount >= 5) {
+              log(tokenName, `换皮闯关 BOSS${type} 连续失败5次，跳过`, 'warning');
               break;
             }
           }
@@ -781,7 +803,7 @@ async function runSkinChallenge(client, tokenName, delay = 500) {
         await sleep(delay);
       }
 
-      if (isTowerCleared(type, levelRewardMap)) {
+      if (isTowerCleared(type)) {
         log(tokenName, `换皮闯关 BOSS${type} 全部通关`, 'success');
       }
     }

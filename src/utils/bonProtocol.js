@@ -849,7 +849,7 @@ export const GameMessages = {
     cmd: "role_getroleinfo",
     body: encode(
       {
-        clientVersion: "2.10.3-f10a39eaa0c409f4-wx",
+        clientVersion: "2.34.1",
         inviteUid: 0,
         platform: "hortor",
         platformExt: "mix",

@@ -90,6 +90,7 @@ const stopUsingItems = () => {
 import { computed, onMounted, ref, watch } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
 import { useMessage } from "naive-ui";
+import { getTowerActId } from "@/utils/towerActId";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -102,6 +103,15 @@ const climbTimeout = ref(null); // 用于超时重置状态
 const itemTimeout = ref(null); // 用于道具使用超时
 const mergeTimeout = ref(null); // 用于合成超时
 const lastClimbResult = ref(null); // 最后一次爬塔结果
+
+// 当前活动周期 actId（基于周五轮换）
+const towerActId = computed(() => getTowerActId());
+
+// 通用的 tower 请求参数（actId + clientVersion）
+const towerParams = computed(() => ({
+  actId: towerActId.value,
+  clientVersion: "2.34.1",
+}));
 
 // 计算属性 - 从gameData中获取塔相关信息
 const evoTowerInfo = computed(() => {
@@ -214,7 +224,7 @@ const startUseItems = async () => {
     const towerInfoRes = await tokenStore.sendMessageWithPromise(
       tokenId,
       "evotower_getinfo",
-      {},
+      towerParams.value,
       5000
     );
 
@@ -250,6 +260,7 @@ const startUseItems = async () => {
         tokenId,
         "mergebox_openbox",
         {
+          ...towerParams.value,
           actType: 1,
           pos: pos
         },
@@ -267,7 +278,7 @@ const startUseItems = async () => {
     await tokenStore.sendMessageWithPromise(
       tokenId,
       "mergebox_claimcostprogress",
-      { actType: 1 },
+      { ...towerParams.value, actType: 1 },
       5000
     ).catch(() => {});
 
@@ -322,7 +333,7 @@ const autoMergeItems = async () => {
       const infoRes = await tokenStore.sendMessageWithPromise(
         tokenId,
         "mergebox_getinfo",
-        { actType: 1 },
+        { ...towerParams.value, actType: 1 },
         5000
       );
 
@@ -341,7 +352,7 @@ const autoMergeItems = async () => {
              await tokenStore.sendMessageWithPromise(
                tokenId,
                "mergebox_claimmergeprogress",
-               { actType: 1, taskId: parseInt(taskId) },
+               { ...towerParams.value, actType: 1, taskId: parseInt(taskId) },
                2000
              ).catch(() => {});
              await new Promise((res) => setTimeout(res, 500));
@@ -399,7 +410,7 @@ const autoMergeItems = async () => {
         await tokenStore.sendMessageWithPromise(
           tokenId,
           "mergebox_automergeitem",
-          { actType: 1 },
+          { ...towerParams.value, actType: 1 },
           10000 
         );
         await new Promise((res) => setTimeout(res, 1500));
@@ -418,6 +429,7 @@ const autoMergeItems = async () => {
               tokenId,
               "mergebox_mergeitem",
               {
+                ...towerParams.value,
                 actType: 1,
                 sourcePos: { gridX: source.x, gridY: source.y },
                 targetPos: { gridX: target.x, gridY: target.y }
@@ -496,7 +508,7 @@ const startTowerClimb = async () => {
       await tokenStore.sendMessageWithPromise(
         tokenId,
         "evotower_readyfight",
-        {},
+        towerParams.value,
         5000,
       );
 
@@ -505,6 +517,7 @@ const startTowerClimb = async () => {
         tokenId,
         "evotower_fight",
         {
+          ...towerParams.value,
           battleNum: 1,
           winNum: 1,
         },
@@ -534,7 +547,7 @@ const startTowerClimb = async () => {
              await tokenStore.sendMessageWithPromise(
                tokenId,
                "evotower_claimtask",
-               { taskId: taskId },
+               { ...towerParams.value, taskId: taskId },
                2000
              ).then(() => {
                 message.success(`领取每日任务奖励 ${taskId} 成功`);
@@ -560,7 +573,7 @@ const startTowerClimb = async () => {
         await tokenStore.sendMessageWithPromise(
           tokenId,
           "evotower_claimreward",
-          {},
+          towerParams.value,
           5000,
         );
         message.success(`成功领取第${Math.floor(towerId / 10)}章通关奖励！`);
@@ -573,6 +586,7 @@ const startTowerClimb = async () => {
       tokenId,
       'mergebox_getinfo',
       {
+        ...towerParams.value,
         actType: 1
       },
       5000
@@ -583,6 +597,7 @@ const startTowerClimb = async () => {
         tokenId,
         'mergebox_claimfreeenergy',
         {
+          ...towerParams.value,
           actType: 1
         },
         5000
@@ -620,7 +635,7 @@ const getTowerInfo = async () => {
     await tokenStore.sendMessageWithPromise(
       tokenId,
       "evotower_getinfo",
-      {},
+      towerParams.value,
       5000,
     );
     // 更新角色信息

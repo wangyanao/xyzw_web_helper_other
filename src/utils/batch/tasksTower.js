@@ -1,3 +1,5 @@
+import { getTowerActId } from "../towerActId.js";
+
 /**
  * 爬塔类任务
  * 包含: climbTower, climbWeirdTower, batchClaimFreeEnergy
@@ -648,10 +650,11 @@ export function createTasksTower(deps) {
         await ensureConnection(tokenId);
 
         // 获取活动信息
+        const towerReqBase = { actId: getTowerActId(), clientVersion: '2.34.1' };
         let res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "towers_getinfo",
-          {},
+          towerReqBase,
           5000
         );
         
@@ -689,6 +692,8 @@ export function createTasksTower(deps) {
         }
 
         let levelRewardMap = towerData.levelRewardMap || {};
+        // 新版进度数据（替代已废弃的 levelRewardMap）
+        let towerProgressMap = towerData.towerData || {};
         
         // 计算今日开放的BOSS
         const todayWeekDay = new Date().getDay(); // 0-6 (Sun-Sat)
@@ -703,19 +708,28 @@ export function createTasksTower(deps) {
         };
         const todayOpenTowers = openTowerMap[todayWeekDay] || [];
 
-        // 辅助函数：判断是否已通关
-        const isTowerCleared = (type, map) => {
+        // 辅助函数：判断是否已通关（新版优先用 towerData[type].pass）
+        const isTowerCleared = (type, _map) => {
+          const td = towerProgressMap[type];
+          if (td) {
+            // pass=1 表示已全部通关；actTowerLv 仅表示当前所在层，不能作为通关依据
+            if (td.pass === 1 || td.pass === true) return true;
+          }
+          // 兼容旧版 levelRewardMap
           const key1 = `${type}008`;
           const key2 = Number(key1);
-          return !!(map[key1] || map[key2]);
+          return !!(_map[key1] || _map[key2]);
         };
         
-        // 辅助函数：获取当前层数
-        const getTowerLevel = (type, map) => {
+        // 辅助函数：获取当前层数（新版优先用 actTowerLv）
+        const getTowerLevel = (type, _map) => {
+          const td = towerProgressMap[type];
+          if (td && td.actTowerLv != null) return td.actTowerLv;
+          // 兼容旧版 levelRewardMap
            for (let i = 8; i >= 1; i--) {
             const key1 = `${type}00${i}`;
             const key2 = Number(key1);
-            if (map[key1] || map[key2]) {
+            if (_map[key1] || _map[key2]) {
                 if (i === 8) return 8;
                 return i + 1;
             }
@@ -764,13 +778,19 @@ export function createTasksTower(deps) {
             let failCount = 0;
 
             while (loop && !shouldStop.value) {
+                const towerFightParams = { towerType: type, actId: towerData.actId, clientVersion: '2.34.1' };
                 if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type }, 5000);
+                    try {
+                        await tokenStore.sendMessageWithPromise(tokenId, "towers_start", towerFightParams, 5000);
+                    } catch (e) {
+                        // 200330 = 存在未完成挑战，可直接 fight，忽略此错误
+                        if (!e.message?.includes('200330')) throw e;
+                    }
                     // 稍微等待一下
                     await new Promise(r => setTimeout(r, 500));
                 }
 
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type }, 5000);
+                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", towerFightParams, 5000);
                 const battleData = fightRes?.battleData;
                 const curHP = battleData?.result?.accept?.ext?.curHP;
                 
@@ -783,13 +803,15 @@ export function createTasksTower(deps) {
                         type: "success",
                      });
 
+                     // 挑战仍活跃，不需要重新 start，直接继续 fight 下一层
                      needStart = false;
                      failCount = 0;
 
                      // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", {}, 5000);
+                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", towerReqBase, 5000);
                      towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
                      levelRewardMap = towerData.levelRewardMap || {};
+                     towerProgressMap = towerData.towerData || {};
 
                      if (isTowerCleared(type, levelRewardMap)) {
                         loop = false;
@@ -808,13 +830,14 @@ export function createTasksTower(deps) {
                         type: "warning",
                      });
 
+                     // 挑战失败，需要重新 start（200330 已在 towers_start 处捕获）
                      needStart = true;
                      failCount++;
 
-                     if (failCount >= 3) {
+                     if (failCount >= 5) {
                          addLog({
                             time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 连续失败3次，跳过`,
+                            message: `${token.name} BOSS ${type} 连续失败5次，跳过`,
                             type: "error",
                          });
                          loop = false;

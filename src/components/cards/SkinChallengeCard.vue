@@ -66,6 +66,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
+import { getTowerActId } from "@/utils/towerActId.js";
 import { useMessage } from "naive-ui";
 import MyCard from "../Common/MyCard.vue";
 
@@ -94,8 +95,17 @@ const isActivityValid = computed(() => {
 });
 
 const levelRewardMap = ref({});
-const dailyFightNum = ref(0); // Mock or real data
-const finishedCount = computed(() => Object.keys(levelRewardMap.value).length);
+// 新版：用 towerDataMap 替代已废弃的 levelRewardMap（存储 towerData.towerData）
+const towerDataMap = ref({});
+const dailyFightNum = ref(0);
+const finishedCount = computed(() => {
+  // 统计已通关的 BOSS 数量
+  let count = 0;
+  for (let type = 1; type <= 6; type++) {
+    if (isTowerClearedByPass(type)) count++;
+  }
+  return count;
+});
 
 const statusClass = computed(() => {
   if (finishedCount.value >= 48) return "completed";
@@ -131,21 +141,33 @@ const isTowerOpen = (type) => {
   return todayOpenTowers.value.includes(type) || todayOpenTowers.value.includes(6) && todayWeekDay === 4; // Special case for Thursday if map is correct
 };
 
+const isTowerClearedByPass = (type) => {
+  const td = towerDataMap.value[type];
+  if (!td) return false;
+  // pass=1 表示已全部通关；actTowerLv 仅表示当前所在层，不能作为通关依据
+  return td.pass === 1 || td.pass === true;
+};
+
 const isTowerCleared = (type) => {
+  // 兼容旧逻辑：同时检查 levelRewardMap 和新版 towerDataMap
+  if (isTowerClearedByPass(type)) return true;
   const key1 = `${type}008`;
   const key2 = Number(key1);
   return !!(levelRewardMap.value[key1] || levelRewardMap.value[key2]);
 };
 
 const getTowerLevel = (type) => {
-  // Find highest cleared level
+  // 新版：优先使用 actTowerLv
+  const td = towerDataMap.value[type];
+  if (td && td.actTowerLv != null) {
+    return td.actTowerLv;
+  }
+  // 兼容旧逻辑：从 levelRewardMap 推断
   for (let i = 8; i >= 1; i--) {
     const key1 = `${type}00${i}`;
     const key2 = Number(key1);
     if (levelRewardMap.value[key1] || levelRewardMap.value[key2]) {
-        // If 8 is cleared, return 8
         if (i === 8) return 8;
-        // Else return next level
         return i + 1;
     }
   }
@@ -162,19 +184,21 @@ const getInfo = async () => {
   if (tokenStore.getWebSocketStatus(tokenId) !== "connected") return;
 
   try {
-    const res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", {}, 5000);
+    const reqParams = { actId: getTowerActId(), clientVersion: '2.34.1' };
+    const res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", reqParams, 5000);
     if (res) {
       // Handle nested data structure if necessary
       const data = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
       
       actId.value = data.actId;
       levelRewardMap.value = data.levelRewardMap || {};
+      // 新版进度数据
+      towerDataMap.value = data.towerData || {};
       
       console.log('SkinChallenge Info:', {
          actId: data.actId,
-         mapSize: Object.keys(levelRewardMap.value).length,
-         keys: Object.keys(levelRewardMap.value).slice(0, 10),
-         map: levelRewardMap.value,
+         towerData: data.towerData,
+         levelRewardMapSize: Object.keys(levelRewardMap.value).length,
          rawRes: res
       });
 
@@ -209,11 +233,19 @@ const challengeSingle = async (type) => {
      let failCount = 0;
      
      while (loop) {
+        const towerReqParams = { towerType: type, actId: actId.value, clientVersion: '2.34.1' };
         if (needStart) {
-            await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type }, 5000);
+            try {
+                await tokenStore.sendMessageWithPromise(tokenId, "towers_start", towerReqParams, 5000);
+            } catch (e) {
+                // 200330 = 存在未完成挑战，可直接 fight，忽略此错误
+                if (!e.message?.includes('200330')) {
+                    throw e;
+                }
+            }
         }
         
-        const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type }, 5000);
+        const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", towerReqParams, 5000);
         const battleData = fightRes?.battleData;
         const curHP = battleData?.result?.accept?.ext?.curHP;
         
@@ -222,11 +254,11 @@ const challengeSingle = async (type) => {
             const currentLevel = getTowerLevel(type);
             message.success(`BOSS ${type} 第 ${currentLevel} 层挑战成功`);
             
-            // 挑战成功，不需要重新 start，直接继续 fight
+            // 挑战成功，挑战仍活跃，不需要重新 start，直接继续 fight 下一层
             needStart = false;
             failCount = 0;
             
-            // 检查是否通关（需要更新 levelRewardMap）
+            // 检查是否通关（需要更新进度数据）
             await getInfo();
             if (isTowerCleared(type)) {
                 loop = false;
@@ -238,12 +270,12 @@ const challengeSingle = async (type) => {
         } else {
             const currentLevel = getTowerLevel(type);
             message.warning(`BOSS ${type} 第 ${currentLevel} 层挑战失败`);
-            // 挑战失败，需要重新 start
+            // 挑战失败，需要重新 start（200330 已在 towers_start 处捕获）
             needStart = true;
             failCount++;
             
-            if (failCount >= 3) {
-                message.error(`BOSS ${type} 第 ${currentLevel} 层连续失败 3 次，停止挑战`);
+            if (failCount >= 5) {
+                message.error(`BOSS ${type} 第 ${currentLevel} 层连续失败 5 次，停止挑战`);
                 loop = false;
             } else {
                 await new Promise(r => setTimeout(r, 1000));
