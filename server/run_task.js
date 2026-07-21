@@ -1356,18 +1356,31 @@ function normalizeCars(raw) {
   const r = raw || {};
   const body = r.body || r;
   const roleCar = body.roleCar || body.rolecar || {};
+
+  // 优先从 roleCar.carDataMap 解析（id -> info）
   const carMap = roleCar.carDataMap || roleCar.cardatamap;
   if (carMap && typeof carMap === 'object') {
-    return Object.entries(carMap).map(([id, info]) => ({ id, ...(info || {}) }));
+    return Object.entries(carMap).map(([id, info]) => ({
+      id,
+      sendAt: info?.sendAt ?? info?.sendtime ?? info?.send_at,
+      color: info?.color,
+      rewards: info?.rewards,
+      refreshCount: info?.refreshCount,
+      helperId: info?.helperId ?? info?.guardId,
+      ...(info || {}),
+    }));
   }
-  let arr = body.cars || body.list || body.data || body.carList || [];
+
+  // 兜底
+  let arr = body.cars || body.list || body.data || body.carList || body.vehicles || [];
   if (!Array.isArray(arr) && typeof arr === 'object' && arr !== null) arr = Object.values(arr);
+  if (Array.isArray(body) && arr.length === 0) arr = body;
   return Array.isArray(arr) ? arr : [];
 }
 
 // 判断是否可收车（发出后满4小时，对齐前端 canClaim 逻辑）
 function canClaim(car) {
-  const t = Number(car?.sendAt || 0);
+  const t = Number(car?.sendAt ?? car?.sendtime ?? car?.send_at ?? 0);
   if (!t) return false;
   const tsMs = t < 1e12 ? t * 1000 : t;
   return Date.now() - tsMs >= 4 * 60 * 60 * 1000;
@@ -1920,14 +1933,37 @@ async function runClaimCars(client, tokenName, delay = 500) {
     const res = await client.sendWithPromise('car_getrolecar', {}, 10000);
     const cars = normalizeCars(res);
     log(tokenName, `收车：共找到 ${cars.length} 辆车`);
+
+    // 详细日志：每辆车的 sendAt / 可收车状态
+    let claimable = 0, alreadySent = 0, notSent = 0;
+    const nowMs = Date.now();
+    for (const car of cars) {
+      const sendAt = Number(car?.sendAt || 0);
+      if (sendAt === 0) {
+        notSent++;
+      } else {
+        alreadySent++;
+        const tsMs = sendAt < 1e12 ? sendAt * 1000 : sendAt;
+        const remainingMs = tsMs + 4 * 60 * 60 * 1000 - nowMs;
+        if (remainingMs <= 0) {
+          claimable++;
+        } else {
+          const remainingMin = Math.ceil(remainingMs / 60000);
+          log(tokenName, `  车辆[${gradeLabel(car.color)}] id=${car.id} 距可收车还有 ${remainingMin} 分钟`, 'info');
+        }
+      }
+    }
+    log(tokenName, `收车状态统计: 已发车=${alreadySent}, 可收=${claimable}, 未发车=${notSent}`, 'info');
+
     if (cars.length > 0) {
       const sample = cars[0];
-      log(tokenName, `[调试] 车辆样例: id=${sample.id} sendAt=${sample.sendAt} color=${sample.color} status=${sample.status}`, 'info');
+      log(tokenName, `[调试] 车辆样例: id=${sample.id} sendAt=${sample.sendAt} color=${sample.color}`, 'info');
     }
+
     let claimed = 0;
     for (const car of cars) {
       if (canClaim(car)) {
-        await execCmd(client, tokenName, 'car_claim', { carId: String(car.id) }, `收车[id:${car.id} 色:${car.color}]`, 10000);
+        await execCmd(client, tokenName, 'car_claim', { carId: String(car.id) }, `收车[id:${car.id} 色:${gradeLabel(car.color)}]`, 10000);
         claimed++;
         await sleep(delay);
       }
