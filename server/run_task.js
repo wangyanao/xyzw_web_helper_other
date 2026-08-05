@@ -2391,6 +2391,20 @@ async function main() {
   }
 
   const { name: taskName, selectedTokens = [], selectedTasks = [] } = task;
+
+  // 强制任务排序（兜底）：若同时包含 一键收车(batchClaimCars) 和 智能发车(batchSmartSendCar)，
+  // 必须保证 一键收车 在 智能发车 之前（先收车再发车），即使前端传了错误顺序也在此纠正
+  const orderedSelectedTasks = [...selectedTasks];
+  {
+    const claimIdx = orderedSelectedTasks.indexOf('batchClaimCars');
+    const smartIdx = orderedSelectedTasks.indexOf('batchSmartSendCar');
+    if (claimIdx !== -1 && smartIdx !== -1 && smartIdx < claimIdx) {
+      orderedSelectedTasks.splice(claimIdx, 1);
+      orderedSelectedTasks.splice(orderedSelectedTasks.indexOf('batchSmartSendCar'), 0, 'batchClaimCars');
+      log(taskName, `检测到任务顺序异常，已强制调整：一键收车(batchClaimCars) 移到 智能发车(batchSmartSendCar) 之前`, 'info');
+    }
+  }
+
   // 从独立文件加载配置（而非从 tasks.json 内联）
   const batchSettings = loadBatchRunSettings();
   const taskDelay = batchSettings.taskDelay ?? batchSettings.commandDelay ?? 500;
@@ -2463,7 +2477,7 @@ async function main() {
 
       // 在每个任务开始前检查连接（sendWithPromise 内也有二次兜底）
       let checkedTasksCount = 0;
-      for (const taskType of selectedTasks) {
+      for (const taskType of orderedSelectedTasks) {
         const runner = TASK_RUNNERS[taskType];
         if (!runner) {
           log(tokenName, `不支持的任务类型: ${taskType}（需在 run_task.js 中补充）`, 'warning');

@@ -3141,6 +3141,19 @@ const syncTasksToServer = async (tasks) => {
   }
 };
 
+// 强制任务排序：若同时包含 一键收车(batchClaimCars) 和 智能发车(batchSmartSendCar)，
+// 必须保证 一键收车 在 智能发车 之前（先收车再发车）
+const enforceCarTaskOrder = (tasks) => {
+  const arr = [...tasks];
+  const claimIdx = arr.indexOf("batchClaimCars");
+  const smartIdx = arr.indexOf("batchSmartSendCar");
+  if (claimIdx !== -1 && smartIdx !== -1 && smartIdx < claimIdx) {
+    arr.splice(claimIdx, 1);
+    arr.splice(arr.indexOf("batchSmartSendCar"), 0, "batchClaimCars");
+  }
+  return arr;
+};
+
 // Open task modal for adding new task
 const openTaskModal = () => {
   editingTask.value = null;
@@ -3177,6 +3190,8 @@ const editTask = (task) => {
     );
   }
   Object.assign(taskForm, taskData);
+  // 加载历史任务时强制排序：一键收车 必须排在 智能发车 之前
+  taskForm.selectedTasks = enforceCarTaskOrder(taskForm.selectedTasks);
   taskScheduleSelectedGroupIds.value = [];
   showTaskModal.value = true;
 };
@@ -3266,7 +3281,8 @@ const saveTask = () => {
     runTime: formattedRunTime,
     cronExpression: taskForm.runType === "cron" ? taskForm.cronExpression : "",
     selectedTokens: [...taskForm.selectedTokens],
-    selectedTasks: [...taskForm.selectedTasks],
+    // 保存时强制排序：一键收车 必须排在 智能发车 之前
+    selectedTasks: enforceCarTaskOrder(taskForm.selectedTasks),
     enabled: taskForm.enabled,
   };
 
